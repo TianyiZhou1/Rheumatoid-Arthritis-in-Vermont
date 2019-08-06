@@ -1,0 +1,144 @@
+---
+title: "Rheumatoid Arthritis in Vermont"
+author: "Tianyi Zhou"
+date: "3/30/2019"
+output: word_document
+---
+```{r}
+#load packages
+library(tidyverse)
+library(knitr)
+library(readxl)
+library(readr)
+library(writexl)
+#import data
+#data source 
+#http://www.healthvermont.gov/health-statistics-vital-records/health-care-systems-reporting/hospital-discharge-data
+op <- read_csv("VTOUTP16.csv")
+rev<-read_csv("VTREVCODE16.csv")
+```
+###Introduction to Rheumatoid Arthritis
+A chronic systemic disease, primarily of the joints, marked by inflammatory changes in the synovial membranes and articular structures, widespread fibrinoid degeneration of the collagen fibers in mesenchymal tissues, and by atrophy and rarefaction of bony structures. Etiology is unknown, but autoimmune mechanisms have been implicated.
+
+An autoimmune disease that causes pain, swelling, and stiffness in the joints, and may cause severe joint damage, loss of function, and disability. The disease may last from months to a lifetime, and symptoms may improve and worsen over time
+
+It can affect any joint but is common in the wrist and fingers. More women than men get rheumatoid arthritis. It often starts between ages 25 and 55. You might have the disease for only a short time, or symptoms might come and go. The severe form can last a lifetime.rheumatoid arthritis is different from osteoarthritis, the common arthritis that often comes with older age. Ra can affect body parts besides joints, such as your eyes, mouth and lungs. Ra is an autoimmune disease, which means the arthritis results from your immune system attacking your body's own tissues. No one knows what causes rheumatoid arthritis. Genes, environment and hormones might contribute. Treatments include medicine, lifestyle changes and surgery. These can slow or stop joint damage and reduce pain and swelling. nih: national institute of arthritis and musculoskeletal and skin diseases.
+
+Reference:https://www.icd10data.com/ICD10CM/Codes/M00-M99/M05-M14/M06-/M06.9
+
+Rheumatoid Arthritis is a chronoic disease and thus we focus on the outpatient data.
+Vermont and Massachusettes have similiar geographic and weather conditions, both in northeast and known for cold and snowy weather in long winter. Since the Vermont All Payer Claim Data is publicly available, I use Vermont data to conduct the analysis and I belive the method is the same for Massachusettes data.
+
+### Find the Rheumatoid Arthritis cohorts
+```{r}
+#2019 ICD-10-CM Diagnosis Code M06.9
+#Rheumatoid arthritis, unspecified
+#There are two major clinical chapters of Rheumatoid Arthritis
+#Rheumatoid Arthritis and other rheumatoid with systemic involvement
+#In total we have 330 codes for Rheumatoid Arthritis diagnosis
+###Import the Rheumatoid Arthritis codes
+Rcode <-  read_excel("Mcode.xlsx", sheet = "rheumatoid arthritis")
+Ocode<- read_excel("Mcode.xlsx", sheet = "other rheumatoid with systemic ")
+###Go through DX1-DX20 to filter out Rheumatoid Arthritis patients
+str(Rcode)# 214 codes
+str(Ocode)# 116 codes
+```
+
+```{r}
+### Filter out Rheumatoid Arthritis cohorts
+code<-rbind(Rcode,Ocode)[1]
+
+#*transfer the type into vector for in%in function input
+code<-as.vector(code$`ICD-10 Codes`)
+cohort<-op %>%filter_at(vars(starts_with("DX")), any_vars(.%in% code))
+```
+There are 1002 outpatient visits in 2016 State Vermont.
+###Find subcorts
+```{r}
+#disease
+dis<-data.frame(cohort[,10:29])
+list<-dis %>% gather(key,value)%>% filter_all(any_vars(. %in% code)) %>% group_by(value) %>% summarise(n=n()) %>% arrange(desc(n))
+list<-rename(list,"ICD-10 Codes"="value") %>% mutate(sum=sum(n),percentage=n/sum) %>% select(-sum)
+
+name<-rbind(Rcode,Ocode) %>% select(1:2)
+result<-left_join(list,name)
+write_xlsx(x = result, path = "sub.xlsx", col_names = TRUE)
+```
+
+### Analyze demographics charteristics
+```{r}
+#sex
+demo1<-cohort %>% group_by(sex) %>% summarize(n=n())
+write_xlsx(x = demo1, path = "sex.xlsx", col_names = TRUE)
+demo2<-cohort %>% group_by(intage) %>% summarize(n=n()) 
+write_xlsx(x = demo2, path = "age.xlsx", col_names = TRUE)
+```
+
+### Analyze payers 
+```{r}
+demo3<-cohort %>% group_by(PPAY) %>% summarize(n=n())
+write_xlsx(x = demo3, path = "payer.xlsx", col_names = TRUE)
+```
+
+### Analyze discharge status
+```{r}
+demo4<-cohort %>% group_by(dstat) %>% summarize(n=n())
+write_xlsx(x = demo4, path = "dstat.xlsx", col_names = TRUE)
+```
+### Analyze pdays
+```{r}
+demo5<-cohort %>% group_by(pdays) %>% summarize(n=n())
+write_xlsx(x = demo5, path = "pdays.xlsx", col_names = TRUE)
+```
+
+### Evaluation utilizations of Rheumatoid Arthritis treatment and services
+#Common Procedures, Average and Most Common Revenues and Services
+```{r}
+boxplot(cohort$CHRGS)
+
+cohort2<-cohort
+cohort2$PPAY<-as.factor(cohort2$PPAY)
+p <- ggplot(cohort2, aes(x=PPAY, y=CHRGS)) + 
+  geom_boxplot()
+
+#filter RA in rev data
+ID<-as.vector(cohort$Uniq)
+rev1<-rev %>% filter(Uniq %in% ID)
+#REV description
+revcode<-read_excel("HS_2016VT_REVCODE_FILE_LAYOUT_and_CODES-2.xls", 
+    sheet = "REVCODE")
+revcode$REVCODE<-str_sub(revcode$REVCODE,2)
+rev1$REVCODE<-as.character(rev1$REVCODE)
+#frequent treatment
+treat<-rev1 %>% group_by(REVCODE) %>% summarize(n=n()) %>% arrange(desc(n))
+treat<-left_join(treat,revcode)
+write_xlsx(x = treat, path = "treat.xlsx", col_names = TRUE)
+# costly treatment
+costlyt<-rev1 %>% group_by(REVCODE) %>% summarise(avg=mean(REVCHRGS)) %>% arrange(desc(avg))
+costlyt<-left_join(costlyt,revcode)
+write_xlsx(x = costlyt, path = "costlyt.xlsx", col_names = TRUE)
+```
+
+### Go through patients' pathways
+
+```{r}
+cohort %>% filter(dstat==8) %>% select(Uniq)
+###556416,561713,785100,1559004	
+op %>%  filter(Uniq ==556416)
+rev %>% filter(Uniq ==556416) %>% group_by(REVCODE) %>% arrange(desc(REVCHRGS))
+
+###M069
+sub<-cohort %>% filter(DX1=="M069") %>% select(Uniq)#61 obs
+filter_at(vars(starts_with("DX")), any_vars(.%in% code))
+sub2<-cohort %>% filter_at(vars(starts_with("DX")), any_vars(.=="M069"))
+
+op %>%  filter(Uniq ==41671	)
+rev %>% filter(Uniq ==41671	) %>% group_by(REVCODE) %>% arrange(desc(REVCHRGS))
+```
+
+
+####compared with guidebook
+```{r}
+
+```
+
